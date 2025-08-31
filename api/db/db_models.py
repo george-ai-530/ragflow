@@ -526,6 +526,55 @@ class User(DataBaseModel, UserMixin):
         db_table = "user"
 
 
+class LDAPConfig(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    name = CharField(max_length=100, null=False, help_text="LDAP configuration name", index=True)
+    server_host = CharField(max_length=255, null=False, help_text="LDAP server host")
+    server_port = IntegerField(null=False, default=389, help_text="LDAP server port")
+    use_ssl = BooleanField(null=False, default=False, help_text="Use SSL/TLS connection")
+    bind_dn = CharField(max_length=255, null=True, help_text="Bind DN for authentication")
+    bind_password = CharField(max_length=255, null=True, help_text="Bind password")
+    search_base = CharField(max_length=255, null=False, help_text="Search base DN")
+    search_filter = CharField(max_length=255, null=False, default="(objectClass=person)", help_text="LDAP search filter")
+    user_dn_template = CharField(max_length=255, null=True, help_text="User DN template for authentication")
+    attr_mapping = JSONField(null=False, default={
+        "username": "uid",
+        "email": "mail", 
+        "nickname": "displayName",
+        "first_name": "givenName",
+        "last_name": "sn"
+    }, help_text="LDAP attribute mapping")
+    enabled = BooleanField(null=False, default=True, help_text="Enable LDAP authentication")
+    auto_create_user = BooleanField(null=False, default=True, help_text="Auto create user if not exists")
+    sync_enabled = BooleanField(null=False, default=True, help_text="Enable user synchronization")
+    sync_interval = IntegerField(null=False, default=30, help_text="Sync interval in seconds")
+    last_sync_time = DateTimeField(null=True, help_text="Last synchronization time", index=True)
+    sync_status = CharField(max_length=50, null=True, default="idle", help_text="Synchronization status", index=True)
+    
+    class Meta:
+        db_table = "ldap_config"
+
+
+class LDAPUser(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    ldap_config_id = CharField(max_length=32, null=False, help_text="LDAP config ID", index=True)
+    user_id = CharField(max_length=32, null=True, help_text="Associated user ID", index=True)
+    ldap_dn = CharField(max_length=512, null=False, help_text="LDAP distinguished name", index=True)
+    ldap_username = CharField(max_length=255, null=False, help_text="LDAP username", index=True)
+    email = CharField(max_length=255, null=True, help_text="Email from LDAP", index=True)
+    nickname = CharField(max_length=100, null=True, help_text="Display name from LDAP")
+    first_name = CharField(max_length=100, null=True, help_text="First name from LDAP")
+    last_name = CharField(max_length=100, null=True, help_text="Last name from LDAP")
+    ldap_attributes = JSONField(null=True, default={}, help_text="Raw LDAP attributes")
+    is_active = BooleanField(null=False, default=True, help_text="User active status", index=True)
+    last_login_time = DateTimeField(null=True, help_text="Last login time", index=True)
+    last_sync_time = DateTimeField(null=True, help_text="Last sync time", index=True)
+    sync_status = CharField(max_length=50, null=True, default="synced", help_text="Sync status", index=True)
+    
+    class Meta:
+        db_table = "ldap_user"
+
+
 class Tenant(DataBaseModel):
     id = CharField(max_length=32, primary_key=True)
     name = CharField(max_length=100, null=True, help_text="Tenant name", index=True)
@@ -1029,4 +1078,15 @@ def migrate_db():
         migrate(migrator.alter_column_type("canvas_template", "description", JSONField(null=True, default=dict, help_text="Canvas description")))
     except Exception:
         pass
+    
+    # Add LDAP tables
+    try:
+        LDAPConfig.create_table()
+    except Exception:
+        pass
+    try:
+        LDAPUser.create_table()
+    except Exception:
+        pass
+        
     logging.disable(logging.NOTSET)

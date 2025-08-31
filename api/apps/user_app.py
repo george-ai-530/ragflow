@@ -97,6 +97,71 @@ def login():
     except BaseException:
         return get_json_result(data=False, code=settings.RetCode.SERVER_ERROR, message="Fail to crypt password")
 
+    # Try LDAP authentication first
+    try:
+        from api.ldap.ldap_auth import LDAPAuthenticator
+        from api.db.services.ldap_service import LDAPConfigService, LDAPUserService
+        
+        config = LDAPConfigService.get_active_config()
+        if config and config.enabled:
+            authenticator = LDAPAuthenticator()
+            ldap_success, ldap_user_info = authenticator.authenticate_user(email, password)
+            
+            if ldap_success and ldap_user_info:
+                # LDAP authentication successful
+                ldap_user, created = LDAPUserService.create_or_update_user(
+                    config.id, ldap_user_info
+                )
+                
+                if ldap_user:
+                    LDAPUserService.update_login_time(ldap_user.id)
+                    
+                    # Get or create system user
+                    system_user = None
+                    if ldap_user.user_id:
+                        system_users = UserService.query(id=ldap_user.user_id)
+                        system_user = system_users[0] if system_users else None
+                    
+                    if not system_user and config.auto_create_user:
+                        # Auto-create system user
+                        from api.utils import get_uuid
+                        user_data = {
+                            'id': get_uuid(),
+                            'email': ldap_user_info.get('email') or f"{email}@ldap.local",
+                            'nickname': ldap_user_info.get('nickname') or email,
+                            'password': '',  # LDAP users don't need password
+                            'login_channel': 'ldap',
+                            'last_login_time': get_format_time(),
+                            'is_superuser': False,
+                            'status': '1'
+                        }
+                        
+                        system_user = UserService.save(**user_data)
+                        if system_user:
+                            # Link LDAP user to system user
+                            LDAPUserService.model.update(
+                                user_id=system_user.id
+                            ).where(
+                                LDAPUserService.model.id == ldap_user.id
+                            ).execute()
+                    
+                    if system_user:
+                        response_data = system_user.to_json()
+                        system_user.access_token = get_uuid()
+                        login_user(system_user)
+                        system_user.update_time = (current_timestamp(),)
+                        system_user.update_date = (datetime_format(datetime.now()),)
+                        system_user.save()
+                        return construct_response(data=response_data, auth=system_user.get_id(), message="LDAP login successful!")
+    except ImportError:
+        # LDAP module not available, continue with regular authentication
+        pass
+    except Exception as e:
+        logging.exception(f"LDAP authentication error: {e}")
+        # Continue with regular authentication on LDAP error
+        pass
+
+    # Regular password authentication
     user = UserService.query_user(email, password)
     if user:
         response_data = user.to_json()

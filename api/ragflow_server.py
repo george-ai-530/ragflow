@@ -46,6 +46,9 @@ from rag.settings import print_rag_settings
 from rag.utils.mcp_tool_call_conn import shutdown_all_mcp_sessions
 from rag.utils.redis_conn import RedisDistributedLock
 
+# LDAP scheduler imports
+from api.ldap.ldap_scheduler import LDAPBackgroundTask
+
 stop_event = threading.Event()
 
 RAGFLOW_DEBUGPY_LISTEN = int(os.environ.get('RAGFLOW_DEBUGPY_LISTEN', "0"))
@@ -71,6 +74,11 @@ def update_progress():
 def signal_handler(sig, frame):
     logging.info("Received interrupt signal, shutting down...")
     shutdown_all_mcp_sessions()
+    # Shutdown LDAP scheduler
+    try:
+        LDAPBackgroundTask.shutdown_ldap_scheduler()
+    except Exception as e:
+        logging.exception(f"Error shutting down LDAP scheduler: {e}")
     stop_event.set()
     time.sleep(1)
     sys.exit(0)
@@ -125,6 +133,12 @@ if __name__ == '__main__':
     RuntimeConfig.init_config(JOB_SERVER_HOST=settings.HOST_IP, HTTP_PORT=settings.HOST_PORT)
 
     GlobalPluginManager.load_plugins()
+
+    # Initialize LDAP scheduler
+    try:
+        LDAPBackgroundTask.init_ldap_scheduler()
+    except Exception as e:
+        logging.exception(f"Failed to initialize LDAP scheduler: {e}")
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
